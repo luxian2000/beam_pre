@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-08 19:52:05",
+  "config": {
+    "n_qubits": 8,
+    "n_observed": 8,
+    "n_samples": 2400,
+    "kernel_type": "topology",
+    "alpha": 0.1,
+    "n_layers": 2
+  },
+  "performance": {
+    "mse": 0.37940813549572705,
+    "rmse": 0.6159611477160934,
+    "mae": 0.48284741397766984,
+    "r2": 0.6269944325840779
+  },
+  "training_info": {
+    "training_time": 3822.3099389076233,
+    "prediction_time": 764.7764489650726,
+    "train_samples": 2000,
+    "test_samples": 400
+  }
+}

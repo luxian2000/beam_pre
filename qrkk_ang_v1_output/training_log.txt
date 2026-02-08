@@ -1,0 +1,24 @@
+Quantum Kernel Ridge Regression Training Log
+Timestamp: 2026-02-08 19:52:05
+Script name: qrkk_ang_v1
+Output directory: qrkk_ang_v1_output
+==================================================
+Configuration Parameters:
+  Number of qubits: 8
+  Observed beams: 8
+  Sample count: 2400
+  Kernel function type: topology
+  Regularization parameter: 0.1
+  Circuit layers: 2
+==================================================
+Performance Results:
+  MSE: 0.379408
+  RMSE: 0.615961
+  MAE: 0.482847
+  R²: 0.626994
+==================================================
+Training Information:
+  Training time: 3822.31 seconds
+  Prediction time: 764.78 seconds
+  Training samples: 2000
+  Test samples: 400
