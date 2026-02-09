@@ -457,6 +457,20 @@ def main():
         json.dump(results, f, indent=2)
     print(f"评估结果已保存到: {results_path}")
     
+    # 调用分析模块生成图像
+    print("调用分析模块生成结果图像...")
+    try:
+        import pqc_reup_analyze
+        pqc_reup_analyze.analyze_results(
+            epoch_num=len(train_losses),
+            predictions=predictions_original,
+            targets=targets_original,
+            output_dir=output_dir
+        )
+    except Exception as e:
+        print(f"图像生成失败: {e}")
+        print("继续执行其他操作...")
+    
     # 保存模型和其他必要文件
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_path = os.path.join(output_dir, f'model_{timestamp}.pth')

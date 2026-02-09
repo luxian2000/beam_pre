@@ -481,17 +481,113 @@ def analyze_results(epoch_num, predictions=None, targets=None, input_indices=Non
         print(f"训练曲线已保存: {curve_filename}")
 
 def main():
-    """主函数 - 示例用法"""
-    # 这里可以添加命令行参数解析等功能
-    epoch_to_analyze = 5  # 默认分析第5轮
+    """主函数 - 支持命令行运行并自动生成results_epoch_x.png"""
+    import argparse
+    
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='PQC_REUP_V1 结果分析工具')
+    parser.add_argument('--epoch', type=int, default=None, 
+                       help='要分析的epoch编号（默认自动检测最新）')
+    parser.add_argument('--output-dir', type=str, default='pqc_reup_v1_output',
+                       help='输出目录路径')
+    args = parser.parse_args()
     
     print("PQC_REUP_V1 结果分析工具")
     print("=" * 50)
     
-    # 示例用法（需要提供实际的预测、目标和输入索引数据）
-    # analyze_results(epoch_to_analyze, predictions=predictions, targets=targets, input_indices=input_indices)
-    # 对于演示，只运行基础分析
-    analyze_results(epoch_to_analyze)
+    # 确定要分析的epoch
+    if args.epoch is not None:
+        epoch_to_analyze = args.epoch
+        print(f"分析指定epoch: {epoch_to_analyze}")
+    else:
+        # 自动检测最新的epoch
+        epoch_to_analyze = find_latest_epoch(args.output_dir)
+        if epoch_to_analyze is None:
+            print("错误: 未找到任何训练数据文件")
+            return
+        print(f"自动检测到最新epoch: {epoch_to_analyze}")
+    
+    # 智能检测预测结果文件
+    predictions_file = os.path.join(args.output_dir, f'evaluation_results_epoch_{epoch_to_analyze}.json')
+    
+    if os.path.exists(predictions_file):
+        print(f"检测到预测结果文件: {predictions_file}")
+        try:
+            # 加载预测结果
+            with open(predictions_file, 'r') as f:
+                eval_data = json.load(f)
+            
+            predictions = np.array(eval_data['predictions'])
+            targets = np.array(eval_data['targets'])
+            
+            # 尝试加载输入索引（如果存在）
+            input_indices = None
+            config_files = [f for f in os.listdir(args.output_dir) if f.startswith('config_') and f.endswith('.md')]
+            if config_files:
+                # 从最新的配置文件中提取输入索引
+                config_files.sort(reverse=True)
+                latest_config = config_files[0]
+                config_path = os.path.join(args.output_dir, latest_config)
+                try:
+                    with open(config_path, 'r') as f:
+                        config_content = f.read()
+                        # 简单解析输入索引（可根据实际格式调整）
+                        import re
+                        indices_match = re.search(r'input_indices.*?\[(.*?)\]', config_content)
+                        if indices_match:
+                            indices_str = indices_match.group(1)
+                            input_indices = [int(x.strip()) for x in indices_str.split(',') if x.strip().isdigit()]
+                except Exception as e:
+                    print(f"警告: 无法解析配置文件中的输入索引: {e}")
+            
+            if input_indices is None:
+                # 如果无法从配置文件获取，使用默认值
+                print("使用默认输入索引 [0, 1, 2, ..., 11]")
+                input_indices = list(range(12))
+            
+            print(f"输入索引: {input_indices}")
+            
+            # 调用完整分析
+            analyze_results(
+                epoch_num=epoch_to_analyze,
+                predictions=predictions,
+                targets=targets,
+                input_indices=input_indices,
+                output_dir=args.output_dir
+            )
+            
+        except Exception as e:
+            print(f"警告: 加载预测数据失败: {e}")
+            print("回退到基础训练曲线分析模式...")
+            # 回退到基础分析
+            analyze_results(epoch_to_analyze, output_dir=args.output_dir)
+    else:
+        print(f"未找到预测结果文件: {predictions_file}")
+        print("执行基础训练曲线分析...")
+        # 执行基础分析
+        analyze_results(epoch_to_analyze, output_dir=args.output_dir)
+
+def find_latest_epoch(output_dir):
+    """查找最新的epoch编号"""
+    if not os.path.exists(output_dir):
+        return None
+    
+    # 查找训练数据文件
+    data_files = [f for f in os.listdir(output_dir) if f.startswith('training_data_epoch_') and f.endswith('.json')]
+    
+    if not data_files:
+        return None
+    
+    # 提取epoch编号
+    epochs = []
+    for f in data_files:
+        try:
+            epoch = int(f.split('_')[3].split('.')[0])
+            epochs.append(epoch)
+        except:
+            continue
+    
+    return max(epochs) if epochs else None
 
 if __name__ == "__main__":
     main()

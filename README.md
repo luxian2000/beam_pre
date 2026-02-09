@@ -40,3 +40,40 @@
 8. 结果分析：训练完成后，分析模型的预测结果与真实值之间的差异，绘制预测结果与真实值的对比图，计算MSE和MAE指标，评估模型的预测性能。
 9. 数据集：/Users/luxian/DataSpace/beam_pre/sls_beam_data_spatial_domain_vivo.mat
 10. 训练过程和结果分析保存在本仓库内的 pqc_reup_v1_output 目录
+
+
+pqc_reup_v1.py 输出文件命名规则
+1. 模型参数文件
+命名格式: model_params_epoch_{epoch数}.pth
+示例: model_params_epoch_5.pth
+用途: 保存训练完成后的模型参数
+2. 训练过程数据
+命名格式: training_data_epoch_{epoch数}.json
+示例: training_data_epoch_5.json
+用途: 保存训练过程中的损失和MAE数据
+3. 评估结果
+命名格式: evaluation_results_epoch_{epoch数}.json
+示例: evaluation_results_epoch_5.json
+用途: 保存模型评估的预测结果和指标
+4. 时间戳模型文件
+命名格式: model_{时间戳}.pth
+示例: model_20260209_154022.pth
+用途: 带时间戳的模型备份
+5. 评估指标文件
+命名格式: evaluation_metrics.json
+用途: 保存基本的评估指标
+6. 配置文档
+命名格式: config_{时间戳}.md
+示例: config_20260209_154022.md
+用途: 保存实验配置和结果
+7. 继续训练专用文件
+在继续训练版本中，还会生成：
+训练数据: training_data_epoch_{累计epoch数}.json
+输出目录
+所有文件都保存在：pqc_reup_v1_output/ 目录中
+
+文件命名特点
+使用 epoch 数字来标识训练轮次
+时间戳格式为 YYYYMMDD_HHMMSS
+JSON文件用于存储结构化数据
+PTH文件用于存储PyTorch模型参数
