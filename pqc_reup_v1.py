@@ -11,7 +11,7 @@ import os
 import json
 from datetime import datetime
 import re
-
+ 
 # Set random seed
 torch.manual_seed(42)
 np.random.seed(42)
@@ -19,13 +19,13 @@ np.random.seed(42)
 # Hyperparameter configuration
 HYPERPARAMETERS = {
     # Data configuration
-    'TRAIN_START': 0,
-    'TRAIN_END': 2048,  # Directly specify training samples count
-    'EPOCHS': 10,  # Reduced to 5 epochs for quick testing
+    'TRAIN_START': 4096,
+    'TRAIN_END': 8192,
+    'EPOCHS': 10,  # 设置为标准训练轮数
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
-    'CONTINUE_TRAINING': True,  # Whether to continue training from the latest saved model
-    'DEBUG_MODE': False,  # 关闭调试模式以进行完整训练
+    'CONTINUE_TRAINING': True,
+    'DEBUG_MODE': False,
     
     # Top-N accuracy calculation configuration
     'TOP_N_MAX': 10,  # Calculate Top-1 to Top-10 accuracy
@@ -599,11 +599,29 @@ def main():
     torch.save(model.state_dict(), model_save_path)
     print(f"模型参数已保存到: {model_save_path}")
     
-    # 保存训练过程数据
+    # 保存完整的训练过程数据（包含历史+新数据）
     training_data_path = os.path.join(output_dir, f'training_data_epoch_{final_epoch}.json')
     with open(training_data_path, 'w') as f:
         json.dump(training_data, f, indent=2)
-    print(f"训练过程数据已保存到: {training_data_path}")
+    print(f"完整训练过程数据已保存到: {training_data_path}")
+    
+    # 同时保存当前运行的训练数据（仅本次训练的数据点）
+    current_training_data = {
+        'train_losses': train_losses[-HYPERPARAMETERS['EPOCHS']:] if start_epoch > 0 else train_losses,
+        'test_losses': test_losses[-HYPERPARAMETERS['EPOCHS']:] if start_epoch > 0 else test_losses,
+        'mae_scores': mae_scores[-HYPERPARAMETERS['EPOCHS']:] if start_epoch > 0 else mae_scores,
+        'epochs': HYPERPARAMETERS['EPOCHS'],
+        'training_info': {
+            'start_epoch': start_epoch,
+            'final_epoch': HYPERPARAMETERS['EPOCHS'],
+            'is_current_run_only': True
+        }
+    }
+    
+    current_data_path = os.path.join(output_dir, f'training_data_current_run_epoch_{final_epoch}.json')
+    with open(current_data_path, 'w') as f:
+        json.dump(current_training_data, f, indent=2)
+    print(f"当前运行训练数据已保存到: {current_data_path}")
     
     # 评估模型
     print("评估模型性能...")
@@ -652,6 +670,7 @@ def main():
     print(f"输出文件保存在: {output_dir}")
     if start_epoch > 0:
         print(f"累计训练: {start_epoch} + {len(train_losses)} = {final_epoch} epochs")
+        print(f"本次运行训练了 {HYPERPARAMETERS['EPOCHS']} 个epochs")
     else:
         print(f"总共训练: {len(train_losses)} epochs")
 
