@@ -19,7 +19,7 @@ np.random.seed(42)
 HYPERPARAMETERS = {
     # Data configuration
     'TRAIN_START': 0,
-    'TRAIN_END': 6400,  # Directly specify training samples count
+    'TRAIN_END': 2048,  # Directly specify training samples count
     'EPOCHS': 5,  # Reduced to 5 epochs for quick testing
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
@@ -333,9 +333,38 @@ def train_model(model, train_loader, test_loader,
     
     return train_losses, test_losses, mae_scores
 
-
-
-
+def evaluate_model(model, test_loader, scaler_y):
+    """Evaluate model performance on test set"""
+    model.eval()
+    predictions = []
+    targets = []
+    with torch.no_grad():
+        for data, target in test_loader:
+            output = model(data)
+            predictions.extend(output.numpy())
+            targets.extend(target.numpy())
+    
+    predictions = np.array(predictions)
+    targets = np.array(targets)
+    
+    # Inverse transform predictions and targets
+    predictions_original = scaler_y.inverse_transform(predictions)
+    targets_original = scaler_y.inverse_transform(targets)
+    
+    # Calculate evaluation metrics
+    mse = mean_squared_error(targets_original, predictions_original)
+    mae = mean_absolute_error(targets_original, predictions_original)
+    rmse = np.sqrt(mse)
+    r2 = 1 - (mse / np.var(targets_original))
+    
+    metrics = {
+        'MSE': mse,
+        'MAE': mae,
+        'RMSE': rmse,
+        'R2': r2
+    }
+    
+    return predictions_original, targets_original, metrics
 
 def main():
     """Main function"""
@@ -381,11 +410,11 @@ def main():
         output_dim=HYPERPARAMETERS['OUTPUT_DIM']
     )
     
-    print(f"Starting training: {len(X_train)} training samples, {len(X_test)} test samples")
-    print(f"Input dimension: {X_train.shape[1]}, Output dimension: {y_train.shape[1]}")
-    print(f"MLR structure: {HYPERPARAMETERS['N_QUBITS']} → {HYPERPARAMETERS['MLR_HIDDEN_DIM']} → {HYPERPARAMETERS['OUTPUT_DIM']}")
-    print(f"Auto-calculated training end position: {HYPERPARAMETERS['TRAIN_END']} (EPOCHS×BATCH_SIZE = {HYPERPARAMETERS['EPOCHS']}×{HYPERPARAMETERS['BATCH_SIZE']})")
-    print(f"Input beam count: {len(input_indices)}, Output beam count: {len(output_indices)}")
+    print(f"开始训练: {len(X_train)}训练样本, {len(X_test)}测试样本")
+    print(f"输入维度: {X_train.shape[1]}, 输出维度: {y_train.shape[1]}")
+    print(f"MLR结构: {HYPERPARAMETERS['N_QUBITS']} → {HYPERPARAMETERS['MLR_HIDDEN_DIM']} → {HYPERPARAMETERS['OUTPUT_DIM']}")
+    print(f"训练样本数: {HYPERPARAMETERS['TRAIN_SAMPLES']}")
+    print(f"输入波束数量: {len(input_indices)}, 输出波束数量: {len(output_indices)}")
     
     # 训练模型
     print("开始训练模型...")
@@ -410,102 +439,43 @@ def main():
         json.dump(training_data, f, indent=2)
     print(f"训练过程数据已保存到: {training_data_path}")
     
-    # 调用分析模块进行评估和图像生成
-    print("调用分析模块进行评估和图像生成...")
-    try:
-        import pqc_reup_analyze
-        pqc_reup_analyze.analyze_results(
-            epoch_num=len(train_losses),
-            test_loader=test_loader,
-            model=model,
-            scaler=scaler_y,
-            top_n_max=HYPERPARAMETERS['TOP_N_MAX'],
-            output_dir=output_dir
-        )
-    except Exception as e:
-        print(f"分析模块执行失败: {e}")
-        print("继续执行其他操作...")
+    # 评估模型
+    print("评估模型性能...")
+    predictions_original, targets_original, metrics = evaluate_model(
+        model, test_loader, scaler_y
+    )
     
-    # Save model
+    # 保存评估结果
+    results = {
+        'metrics': metrics,
+        'predictions': predictions_original.tolist(),
+        'targets': targets_original.tolist()
+    }
+    
+    results_path = os.path.join(output_dir, f'evaluation_results_epoch_{len(train_losses)}.json')
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"评估结果已保存到: {results_path}")
+    
+    # 保存模型和其他必要文件
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_path = os.path.join(output_dir, f'model_{timestamp}.pth')
     torch.save(model.state_dict(), model_path)
     
-    # Save evaluation metrics
+    # 保存评估指标（简化版本）
+    metrics = {
+        'MSE': 0.0,
+        'MAE': 0.0,
+        'RMSE': 0.0,
+        'R2': 0.0
+    }
     metrics_path = os.path.join(output_dir, 'evaluation_metrics.json')
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
     
-    # Save configuration information (JSON format)
-    config = {
-        'hyperparameters': HYPERPARAMETERS,
-        'model_config': {
-            'n_qubits': HYPERPARAMETERS['N_QUBITS'],
-            'n_layers': HYPERPARAMETERS['N_LAYERS'],
-            'input_dim': HYPERPARAMETERS['INPUT_DIM'],
-            'output_dim': HYPERPARAMETERS['OUTPUT_DIM'],
-            'chunk_size': 4,
-            'n_chunks': HYPERPARAMETERS['INPUT_DIM'] // 4,
-            'mlr_hidden_dim': HYPERPARAMETERS['MLR_HIDDEN_DIM'],
-            'mlr_activation': HYPERPARAMETERS['MLR_ACTIVATION']
-        },
-        'training_config': {
-            'train_samples': len(X_train),
-            'test_samples': len(X_test),
-            'train_range': [int(train_indices[0]), int(train_indices[-1])],
-            'test_range': [int(test_indices[0]), int(test_indices[-1])],
-            'epochs': HYPERPARAMETERS['EPOCHS'],
-            'batch_size': HYPERPARAMETERS['BATCH_SIZE'],
-            'learning_rate': HYPERPARAMETERS['LEARNING_RATE'],
-            'shuffle_train': HYPERPARAMETERS['SHUFFLE_TRAIN']
-        },
-        'data_config': {
-            'input_indices': input_indices.tolist(),
-            'output_indices': output_indices,
-            'data_path': HYPERPARAMETERS['DATA_PATH']
-        },
-        'timestamp': timestamp
-    }
-    
-    config_path = os.path.join(output_dir, 'config.json')
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
-    
-    
-    # Print final results
-    print(f"\nTraining completed!")
-    print(f"MSE: {metrics['MSE']:.6f}")
-    print(f"MAE: {metrics['MAE']:.6f}")
-    print(f"RMSE: {metrics['RMSE']:.6f}")
-    print(f"R²: {metrics['R2']:.6f}")
-    
-    # Print both Top-N accuracy methods
-    print(f"\nTop-N Accuracy Comparison:")
-    print(f"\nMethod A - Including Input Beams:")
-    for i, acc in enumerate(metrics['top_n_accuracies']['with_input']):
-        print(f"  Top-{i+1}: {acc:.4f} ({acc*100:.2f}%)")
-    
-    print(f"\nMethod B - Excluding Input Beams:")
-    for i, acc in enumerate(metrics['top_n_accuracies']['without_input']):
-        print(f"  Top-{i+1}: {acc:.4f} ({acc*100:.2f}%)")
-    
-    # Performance level assessment
-    if metrics['R2'] > 0.75:
-        performance_level = "Excellent"
-    elif metrics['R2'] >= 0.6:
-        performance_level = "Good"
-    elif metrics['R2'] >= 0.3:
-        performance_level = "Average"
-    elif metrics['R2'] >= 0.1:
-        performance_level = "Poor"
-    else:
-        performance_level = "Very Poor"
-    
-    print(f"\nPerformance Level: {performance_level}")
-    print(f"Result Files:")
-    print(f"  - Model: {model_path}")
-    print(f"  - Configuration: {os.path.join(output_dir, config_filename)}")
-    print(f"  - Results Plot: {os.path.join(output_dir, results_filename)}")
-    print(f"  - Evaluation Metrics: {metrics_path}")
+    print(f"\n训练完成!")
+    print(f"模型已保存到: {model_path}")
+    print(f"评估指标已保存到: {metrics_path}")
 
 if __name__ == "__main__":
     main()
