@@ -1,24 +1,24 @@
 # PQC_REUP_V1 Analysis Report - Epoch 5
 
 ## Experiment Information
-- **Analysis Time**: 2026-02-09 16:13:43
+- **Analysis Time**: 2026-02-09 16:56:53
 - **Trained Epochs**: 5
 - **Output Directory**: pqc_reup_v1_output
 
 ## Performance Metrics
-- **MSE (Mean Squared Error)**: 96.939106
-- **MAE (Mean Absolute Error)**: 7.818638
-- **RMSE (Root Mean Squared Error)**: 9.845766
-- **R² Score**: 0.759297
-- **Pearson Correlation**: 0.871673
-- **Performance Level**: Excellent
+- **MSE (Mean Squared Error)**: 236.847192
+- **MAE (Mean Absolute Error)**: 12.268115
+- **RMSE (Root Mean Squared Error)**: 15.389841
+- **R² Score**: 0.431907
+- **Pearson Correlation**: 0.767740
+- **Performance Level**: Fair
 
 ## Training Statistics
-- **Final Training Loss**: 0.005442
-- **Final Test Loss**: 0.005579
-- **Final MAE**: 0.059173
-- **Best Test Loss**: 0.005579
-- **Best MAE**: 0.059173
+- **Final Training Loss**: 0.015346
+- **Final Test Loss**: 0.015504
+- **Final MAE**: 0.099370
+- **Best Test Loss**: 0.015504
+- **Best MAE**: 0.099370
 
 ## Generated Files
 - Training curves plot: training_curves_epoch_5.png

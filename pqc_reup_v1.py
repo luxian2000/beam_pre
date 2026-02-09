@@ -428,7 +428,7 @@ def main():
         'epochs': len(train_losses)
     }
     
-    # 保存模型参数
+    # 保存模型参数（符合项目规范命名）
     model_save_path = os.path.join(output_dir, f'model_params_epoch_{len(train_losses)}.pth')
     torch.save(model.state_dict(), model_save_path)
     print(f"模型参数已保存到: {model_save_path}")
@@ -445,7 +445,7 @@ def main():
         model, test_loader, scaler_y
     )
     
-    # 保存评估结果
+    # 保存完整的评估结果（包含真实指标）
     results = {
         'metrics': metrics,
         'predictions': predictions_original.tolist(),
@@ -471,25 +471,14 @@ def main():
         print(f"图像生成失败: {e}")
         print("继续执行其他操作...")
     
-    # 保存模型和其他必要文件
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = os.path.join(output_dir, f'model_{timestamp}.pth')
-    torch.save(model.state_dict(), model_path)
-    
-    # 保存评估指标（简化版本）
-    metrics = {
-        'MSE': 0.0,
-        'MAE': 0.0,
-        'RMSE': 0.0,
-        'R2': 0.0
-    }
+    # 保存评估指标（使用真实计算的指标，而非零值）
     metrics_path = os.path.join(output_dir, 'evaluation_metrics.json')
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=2)
+    print(f"评估指标已保存到: {metrics_path}")
     
     print(f"\n训练完成!")
-    print(f"模型已保存到: {model_path}")
-    print(f"评估指标已保存到: {metrics_path}")
+    print(f"输出文件保存在: {output_dir}")
 
 if __name__ == "__main__":
     main()
