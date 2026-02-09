@@ -19,8 +19,8 @@ np.random.seed(42)
 HYPERPARAMETERS = {
     # Data configuration
     'TRAIN_START': 0,
-    # TRAIN_END will be automatically calculated based on EPOCHS * BATCH_SIZE
-    'EPOCHS': 400,
+    'TRAIN_END': 6400,  # Directly specify training samples count
+    'EPOCHS': 5,  # Reduced to 5 epochs for quick testing
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
     
@@ -51,10 +51,9 @@ HYPERPARAMETERS = {
     'OUTPUT_DIR': 'pqc_reup_v1_output'
 }
 
-# Automatically calculate related parameters
-HYPERPARAMETERS['TRAIN_END'] = HYPERPARAMETERS['TRAIN_START'] + HYPERPARAMETERS['EPOCHS'] * HYPERPARAMETERS['BATCH_SIZE']
-HYPERPARAMETERS['OUTPUT_DIM'] = HYPERPARAMETERS['TOTAL_FEATURES'] - HYPERPARAMETERS['INPUT_DIM']
+# Calculate derived parameters (TRAIN_END is now fixed, not calculated)
 HYPERPARAMETERS['TRAIN_SAMPLES'] = HYPERPARAMETERS['TRAIN_END'] - HYPERPARAMETERS['TRAIN_START']
+HYPERPARAMETERS['OUTPUT_DIM'] = HYPERPARAMETERS['TOTAL_FEATURES'] - HYPERPARAMETERS['INPUT_DIM']
 HYPERPARAMETERS['TEST_SAMPLES'] = int(HYPERPARAMETERS['TRAIN_SAMPLES'] * HYPERPARAMETERS['TEST_RATIO'])
 HYPERPARAMETERS['TEST_START'] = HYPERPARAMETERS['TRAIN_END']
 HYPERPARAMETERS['TEST_END'] = HYPERPARAMETERS['TEST_START'] + HYPERPARAMETERS['TEST_SAMPLES']
@@ -63,18 +62,19 @@ print(f"Dual Top-N Methods Test Configuration:")
 print(f"Input beam count: {HYPERPARAMETERS['INPUT_DIM']}")
 print(f"Output beam count: {HYPERPARAMETERS['OUTPUT_DIM']}")
 print(f"Total beam count: {HYPERPARAMETERS['TOTAL_FEATURES']}")
+print(f"Training samples: {HYPERPARAMETERS['TRAIN_SAMPLES']}")
+print(f"Testing samples: {HYPERPARAMETERS['TEST_SAMPLES']}")
 print(f"Calculate both Top-N methods: A(including input beams) vs B(excluding input beams)")
 print(f"Early Stopping configuration:")
 print(f"  Patience: {HYPERPARAMETERS['EARLY_STOPPING_PATIENCE']} epochs")
 print(f"  Min Delta: {HYPERPARAMETERS['EARLY_STOPPING_MIN_DELTA']}")
 print(f"  Monitor: {HYPERPARAMETERS['EARLY_STOPPING_MONITOR']}")
-print(f"Automatically calculated verification:")
-print(f"EPOCHS: {HYPERPARAMETERS['EPOCHS']}")
-print(f"BATCH_SIZE: {HYPERPARAMETERS['BATCH_SIZE']}")
-print(f"Automatically calculated TRAIN_END: {HYPERPARAMETERS['TRAIN_END']} ({HYPERPARAMETERS['EPOCHS']} × {HYPERPARAMETERS['BATCH_SIZE']})")
-print(f"Training sample count: {HYPERPARAMETERS['TRAIN_SAMPLES']}")
-print(f"Test sample count: {HYPERPARAMETERS['TEST_SAMPLES']} (20% of training set)")
-print(f"Test range: [{HYPERPARAMETERS['TEST_START']}, {HYPERPARAMETERS['TEST_END']}]")
+print(f"Configuration verification:")
+print(f"  TRAIN_END is directly specified as {HYPERPARAMETERS['TRAIN_END']} samples")
+print(f"  TRAIN_START: {HYPERPARAMETERS['TRAIN_START']}")
+print(f"  TRAIN_SAMPLES: {HYPERPARAMETERS['TRAIN_SAMPLES']}")
+print(f"  TEST_START: {HYPERPARAMETERS['TEST_START']}")
+print(f"  TEST_END: {HYPERPARAMETERS['TEST_END']}")
 print(f"MLR structure: {HYPERPARAMETERS['N_QUBITS']} → {HYPERPARAMETERS['MLR_HIDDEN_DIM']} → {HYPERPARAMETERS['OUTPUT_DIM']}")
 
 class QuantumDataReuploadModel(nn.Module):
@@ -320,7 +320,7 @@ def train_model(model, train_loader, test_loader,
             early_stop_triggered = True
             break
         
-        if epoch % 20 == 0:  # Keep original print frequency
+        if epoch % 10 == 0:  # Reduce print frequency to every 10 epochs
             status = " (Early Stop)" if early_stop_triggered else ""
             print(f'Epoch {epoch}: Train Loss: {train_loss:.6f}, Test Loss: {test_loss:.6f}, MAE: {mae_score:.6f}{status}')
     
@@ -333,296 +333,9 @@ def train_model(model, train_loader, test_loader,
     
     return train_losses, test_losses, mae_scores
 
-def calculate_top_n_accuracy_both_methods(predictions, targets, input_indices, top_n_max=10):
-    """Calculate two Top-N accuracies: including input beams and excluding input beams"""
-    n_samples = len(predictions)
-    
-    # Initialize accuracy counters for both methods
-    top_n_correct_with_input = [0] * top_n_max    # Method A: including input beams
-    top_n_correct_without_input = [0] * top_n_max # Method B: excluding input beams
-    
-    # Create output beam index set (excluding input beams)
-    all_indices = set(range(len(predictions[0])))  # All beam indices
-    output_indices_set = all_indices - set(input_indices)  # Indices excluding input beams
-    
-    for i in range(n_samples):
-        pred_sample = predictions[i]
-        target_sample = targets[i]
-        
-        # Method A: statistics including input beams
-        pred_indices_A = np.argsort(pred_sample)[::-1]  # All beams in descending order
-        target_max_idx_A = np.argmax(target_sample)     # Index of true maximum value
-        
-        # Method B: statistics excluding input beams
-        pred_values_B = pred_sample[list(output_indices_set)]
-        target_values_B = target_sample[list(output_indices_set)]
-        
-        # Get sorting indices within output beams
-        pred_local_indices_B = np.argsort(pred_values_B)[::-1]  # Output beams in descending order
-        target_local_max_idx_B = np.argmax(target_values_B)     # Index of true maximum value within output beams
-        
-        # Map local indices to global indices
-        output_indices_list = list(output_indices_set)
-        pred_global_indices_B = [output_indices_list[idx] for idx in pred_local_indices_B]
-        target_global_max_idx_B = output_indices_list[target_local_max_idx_B]
-        
-        # Calculate Top-N accuracies for both methods
-        for n in range(1, top_n_max + 1):
-            # Method A: check if true optimal beam is in the top N predictions (including all beams)
-            if target_max_idx_A in pred_indices_A[:n]:
-                top_n_correct_with_input[n-1] += 1
-            
-            # Method B: check if true optimal beam is in the top N predictions (only output beams)
-            if target_global_max_idx_B in pred_global_indices_B[:n]:
-                top_n_correct_without_input[n-1] += 1
-    
-    # Calculate accuracies
-    top_n_accuracies_with_input = [correct / n_samples for correct in top_n_correct_with_input]
-    top_n_accuracies_without_input = [correct / n_samples for correct in top_n_correct_without_input]
-    
-    return {
-        'with_input': top_n_accuracies_with_input,      # Method A
-        'without_input': top_n_accuracies_without_input  # Method B
-    }
 
-def evaluate_model_with_top_n(model, test_loader, scaler_y, input_indices, top_n_max=10):
-    """Evaluate model and calculate two Top-N accuracies"""
-    model.eval()
-    predictions = []
-    targets = []
-    
-    with torch.no_grad():
-        for data, target in test_loader:
-            output = model(data)
-            predictions.extend(output.numpy())
-            targets.extend(target.numpy())
-    
-    predictions = np.array(predictions)
-    targets = np.array(targets)
-    
-    # Inverse normalization
-    predictions_original = scaler_y.inverse_transform(predictions)
-    targets_original = scaler_y.inverse_transform(targets)
-    
-    # Calculate evaluation metrics
-    mse = mean_squared_error(targets_original, predictions_original)
-    mae = mean_absolute_error(targets_original, predictions_original)
-    rmse = np.sqrt(mse)
-    
-    # Calculate R² score
-    ss_res = np.sum((targets_original - predictions_original) ** 2)
-    ss_tot = np.sum((targets_original - np.mean(targets_original)) ** 2)
-    r2 = 1 - (ss_res / ss_tot)
-    
-    # Calculate two Top-N accuracies
-    top_n_results = calculate_top_n_accuracy_both_methods(predictions_original, targets_original, input_indices, top_n_max)
-    
-    metrics = {
-        'MSE': float(mse),
-        'MAE': float(mae),
-        'RMSE': float(rmse),
-        'R2': float(r2),
-        'top_n_accuracies': top_n_results
-    }
-    
-    return predictions_original, targets_original, metrics
 
-def plot_results(predictions, targets, train_losses, test_losses, mae_scores, top_n_results, save_path, timestamp):
-    """Plot results charts with both Top-N accuracy methods, using timestamp naming"""
-    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
-    
-    # Training curves
-    axes[0, 0].plot(train_losses, label='Training Loss')
-    axes[0, 0].plot(test_losses, label='Test Loss')
-    axes[0, 0].set_xlabel('Epoch')
-    axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].set_title('Training and Test Loss Curves')
-    axes[0, 0].legend()
-    axes[0, 0].grid(True)
-    
-    # MAE curve
-    axes[0, 1].plot(mae_scores, 'g-', label='MAE')
-    axes[0, 1].set_xlabel('Epoch')
-    axes[0, 1].set_ylabel('MAE')
-    axes[0, 1].set_title('Mean Absolute Error Over Time')
-    axes[0, 1].legend()
-    axes[0, 1].grid(True)
-    
-    # Both Top-N accuracy comparison curves
-    n_values = list(range(1, len(top_n_results['with_input']) + 1))
-    
-    # Method A: Including input beams
-    axes[0, 2].plot(n_values, top_n_results['with_input'], 'bo-', linewidth=2, markersize=6, label='Including Input Beams')
-    
-    # Method B: Excluding input beams
-    axes[0, 2].plot(n_values, top_n_results['without_input'], 'ro-', linewidth=2, markersize=6, label='Excluding Input Beams')
-    
-    axes[0, 2].set_xlabel('N')
-    axes[0, 2].set_ylabel('Top-N Accuracy')
-    axes[0, 2].set_title('Top-N Accuracy Comparison')
-    axes[0, 2].set_xticks(n_values)
-    axes[0, 2].legend()
-    axes[0, 2].grid(True, alpha=0.3)
-    
-    # Predictions vs True Values scatter plot (sample display)
-    sample_indices = np.random.choice(len(predictions), min(1000, len(predictions)), replace=False)
-    axes[1, 0].scatter(targets[sample_indices].flatten(), predictions[sample_indices].flatten(), alpha=0.5)
-    axes[1, 0].plot([targets.min(), targets.max()], [targets.min(), targets.max()], 'r--', lw=2)
-    axes[1, 0].set_xlabel('True Values')
-    axes[1, 0].set_ylabel('Predictions')
-    axes[1, 0].set_title('Predictions vs True Values (Sample)')
-    axes[1, 0].grid(True)
-    
-    # Error distribution
-    errors = (predictions - targets).flatten()
-    axes[1, 1].hist(errors, bins=50, alpha=0.7)
-    axes[1, 1].set_xlabel('Prediction Error')
-    axes[1, 1].set_ylabel('Frequency')
-    axes[1, 1].set_title('Error Distribution')
-    axes[1, 1].grid(True)
-    
-    # Top-N accuracy comparison table
-    axes[1, 2].axis('tight')
-    axes[1, 2].axis('off')
-    table_data = [['Method', 'Top-N', 'Accuracy']]
-    
-    # Add Method A data
-    for i, acc in enumerate(top_n_results['with_input']):
-        table_data.append(['With Input', f'Top-{i+1}', f'{acc:.4f} ({acc*100:.2f}%)'])
-    
-    # Add separator row
-    table_data.append(['', '', ''])
-    
-    # Add Method B data
-    for i, acc in enumerate(top_n_results['without_input']):
-        table_data.append(['Without Input', f'Top-{i+1}', f'{acc:.4f} ({acc*100:.2f}%)'])
-    
-    table = axes[1, 2].table(cellText=table_data, cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    axes[1, 2].set_title('Top-N Accuracy Comparison Summary')
-    
-    plt.tight_layout()
-    # Use specified filename format
-    results_filename = f'results_{timestamp}.png'
-    plt.savefig(os.path.join(save_path, results_filename), dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    return results_filename
 
-def save_experiment_config(output_dir, metrics, train_losses, test_losses, mae_scores, timestamp):
-    """Save experiment configuration and results to document file, using timestamp naming"""
-    
-    # Create configuration document
-    config_content = f"""# PQC_REUP_V1 Experiment Configuration and Results
-
-## Experiment Basic Information
-- **Run Time**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-- **Timestamp**: {timestamp}
-- **Script Name**: pqc_reup_v1.py
-- **Output Directory**: {output_dir}
-
-## Hyperparameter Configuration
-
-### Data Configuration
-- Training sample range: [{HYPERPARAMETERS['TRAIN_START']}, {HYPERPARAMETERS['TRAIN_END']}]
-- Test sample range: [{HYPERPARAMETERS['TEST_START']}, {HYPERPARAMETERS['TEST_END']}]
-- Training sample count: {HYPERPARAMETERS['TRAIN_SAMPLES']}
-- Test sample count: {HYPERPARAMETERS['TEST_SAMPLES']} (automatically calculated as {HYPERPARAMETERS['TEST_RATIO']*100}% of training set)
-- Test set ratio: {HYPERPARAMETERS['TEST_RATIO']}
-- Data file path: {HYPERPARAMETERS['DATA_PATH']}
-
-### Model Configuration
-- Total features: {HYPERPARAMETERS['TOTAL_FEATURES']}
-- Quantum qubits: {HYPERPARAMETERS['N_QUBITS']}
-- Quantum circuit layers: {HYPERPARAMETERS['N_LAYERS']}
-- Input dimension: {HYPERPARAMETERS['INPUT_DIM']}
-- Output dimension: {HYPERPARAMETERS['OUTPUT_DIM']} (automatically calculated: {HYPERPARAMETERS['TOTAL_FEATURES']} - {HYPERPARAMETERS['INPUT_DIM']})
-- Chunk size: 4
-- Chunk count: {HYPERPARAMETERS['INPUT_DIM'] // 4}
-
-### MLR (Multi-Layer Regression) Structure Configuration
-- Hidden layer dimension: {HYPERPARAMETERS['MLR_HIDDEN_DIM']}
-- Activation function: {HYPERPARAMETERS['MLR_ACTIVATION']}
-- Network structure: Quantum output({HYPERPARAMETERS['N_QUBITS']}) → Hidden layer({HYPERPARAMETERS['MLR_HIDDEN_DIM']}) → Output layer({HYPERPARAMETERS['OUTPUT_DIM']})
-
-### Training Configuration
-- Training epochs: {HYPERPARAMETERS['EPOCHS']}
-- Batch size: {HYPERPARAMETERS['BATCH_SIZE']}
-- Learning rate: {HYPERPARAMETERS['LEARNING_RATE']}
-- Shuffle training data: {HYPERPARAMETERS['SHUFFLE_TRAIN']}
-
-### Early Stopping Configuration
-- Patience epochs: {HYPERPARAMETERS['EARLY_STOPPING_PATIENCE']}
-- Minimum improvement threshold: {HYPERPARAMETERS['EARLY_STOPPING_MIN_DELTA']}
-- Monitor metric: {HYPERPARAMETERS['EARLY_STOPPING_MONITOR']}
-
-## Training Results
-
-### Final Evaluation Metrics
-- **MSE**: {metrics['MSE']:.6f}
-- **MAE**: {metrics['MAE']:.6f}
-- **RMSE**: {metrics['RMSE']:.6f}
-- **R²**: {metrics['R2']:.6f}
-
-### Performance Level Evaluation
-"""
-    
-    # Performance level judgment
-    if metrics['R2'] > 0.75:
-        performance_level = "Excellent"
-    elif metrics['R2'] >= 0.6:
-        performance_level = "Good"
-    elif metrics['R2'] >= 0.3:
-        performance_level = "Average"
-    elif metrics['R2'] >= 0.1:
-        performance_level = "Poor"
-    else:
-        performance_level = "Very Poor"
-    
-    config_content += f"- **Performance Level**: {performance_level}\n\n"
-    
-    # Training process summary
-    config_content += f"""### Training Process Summary
-- Final training loss: {train_losses[-1]:.6f}
-- Final test loss: {test_losses[-1]:.6f}
-- Final MAE: {mae_scores[-1]:.6f}
-- Training epochs: {len(train_losses)}
-
-### Top-N Accuracy Results
-
-#### Method A: Including Input Beam Itself
-"""
-    
-    # Method A results
-    for i, acc in enumerate(metrics['top_n_accuracies']['with_input']):
-        config_content += f"- Top-{i+1}: {acc:.4f} ({acc*100:.2f}%)\n"
-    
-    config_content += "\n#### Method B: Excluding Input Beam Itself\n"
-    
-    # Method B results
-    for i, acc in enumerate(metrics['top_n_accuracies']['without_input']):
-        config_content += f"- Top-{i+1}: {acc:.4f} ({acc*100:.2f}%)\n"
-    
-    config_content += f"""
-## File Output
-- Model file: model_*.pth
-- Evaluation metrics: evaluation_metrics.json
-- Configuration file: config.json
-- Visualization chart: top_N_*.png
-
----
-*This file is automatically generated by the program, recording the complete configuration and results of the experiment*
-"""
-    
-    # Save to file, using timestamp naming
-    config_filename = f'config_{timestamp}.md'
-    config_path = os.path.join(output_dir, config_filename)
-    with open(config_path, 'w', encoding='utf-8') as f:
-        f.write(config_content)
-    
-    print(f"Experiment configuration saved to: {config_path}")
-    return config_filename
 
 def main():
     """Main function"""
@@ -674,17 +387,44 @@ def main():
     print(f"Auto-calculated training end position: {HYPERPARAMETERS['TRAIN_END']} (EPOCHS×BATCH_SIZE = {HYPERPARAMETERS['EPOCHS']}×{HYPERPARAMETERS['BATCH_SIZE']})")
     print(f"Input beam count: {len(input_indices)}, Output beam count: {len(output_indices)}")
     
-    # Train model
-    train_losses, test_losses, mae_scores = train_model(
-        model, train_loader, test_loader, 
-        epochs=HYPERPARAMETERS['EPOCHS'], 
-        lr=HYPERPARAMETERS['LEARNING_RATE']
-    )
+    # 训练模型
+    print("开始训练模型...")
+    train_losses, test_losses, mae_scores = train_model(model, train_loader, test_loader)
     
-    # Evaluate model (including both Top-N accuracy methods)
-    predictions, targets, metrics = evaluate_model_with_top_n(
-        model, test_loader, scaler_y, input_indices, HYPERPARAMETERS['TOP_N_MAX']
-    )
+    # 保存训练过程数据
+    training_data = {
+        'train_losses': train_losses,
+        'test_losses': test_losses,
+        'mae_scores': mae_scores,
+        'epochs': len(train_losses)
+    }
+    
+    # 保存模型参数
+    model_save_path = os.path.join(output_dir, f'model_params_epoch_{len(train_losses)}.pth')
+    torch.save(model.state_dict(), model_save_path)
+    print(f"模型参数已保存到: {model_save_path}")
+    
+    # 保存训练过程数据
+    training_data_path = os.path.join(output_dir, f'training_data_epoch_{len(train_losses)}.json')
+    with open(training_data_path, 'w') as f:
+        json.dump(training_data, f, indent=2)
+    print(f"训练过程数据已保存到: {training_data_path}")
+    
+    # 调用分析模块进行评估和图像生成
+    print("调用分析模块进行评估和图像生成...")
+    try:
+        import pqc_reup_analyze
+        pqc_reup_analyze.analyze_results(
+            epoch_num=len(train_losses),
+            test_loader=test_loader,
+            model=model,
+            scaler=scaler_y,
+            top_n_max=HYPERPARAMETERS['TOP_N_MAX'],
+            output_dir=output_dir
+        )
+    except Exception as e:
+        print(f"分析模块执行失败: {e}")
+        print("继续执行其他操作...")
     
     # Save model
     model_path = os.path.join(output_dir, f'model_{timestamp}.pth')
@@ -730,14 +470,6 @@ def main():
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
     
-    # Plot results and get filename (including both Top-N methods)
-    results_filename = plot_results(
-        predictions, targets, train_losses, test_losses, mae_scores, 
-        metrics['top_n_accuracies'], output_dir, timestamp
-    )
-    
-    # Save experiment configuration document
-    config_filename = save_experiment_config(output_dir, metrics, train_losses, test_losses, mae_scores, timestamp)
     
     # Print final results
     print(f"\nTraining completed!")
