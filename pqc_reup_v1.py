@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import os
 import json
 from datetime import datetime
+import re
 
 # Set random seed
 torch.manual_seed(42)
@@ -20,9 +21,11 @@ HYPERPARAMETERS = {
     # Data configuration
     'TRAIN_START': 0,
     'TRAIN_END': 2048,  # Directly specify training samples count
-    'EPOCHS': 5,  # Reduced to 5 epochs for quick testing
+    'EPOCHS': 10,  # Reduced to 5 epochs for quick testing
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
+    'CONTINUE_TRAINING': True,  # Whether to continue training from the latest saved model
+    'DEBUG_MODE': False,  # 关闭调试模式以进行完整训练
     
     # Top-N accuracy calculation configuration
     'TOP_N_MAX': 10,  # Calculate Top-1 to Top-10 accuracy
@@ -250,11 +253,77 @@ def load_and_preprocess_data(filepath, train_start=HYPERPARAMETERS['TRAIN_START'
     return (X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, 
             scaler_X, scaler_y, input_indices, output_indices, train_indices, test_indices)
 
+def load_historical_training_data(output_dir, start_epoch):
+    """加载历史训练数据"""
+    if start_epoch <= 0:
+        return [], [], []
+    
+    # 查找最接近start_epoch的历史训练数据文件
+    training_data_files = [f for f in os.listdir(output_dir) if f.startswith('training_data_epoch_') and f.endswith('.json')]
+    
+    if not training_data_files:
+        return [], [], []
+    
+    # 提取epoch编号并找到最合适的文件
+    epochs = []
+    for f in training_data_files:
+        try:
+            epoch = int(f.split('_')[3].split('.')[0])
+            if epoch <= start_epoch:
+                epochs.append((epoch, f))
+        except:
+            continue
+    
+    if not epochs:
+        return [], [], []
+    
+    # 选择最接近且不超过start_epoch的文件
+    epochs.sort(reverse=True)  # 从大到小排序
+    best_epoch, best_file = epochs[0]
+    
+    try:
+        with open(os.path.join(output_dir, best_file), 'r') as f:
+            historical_data = json.load(f)
+        
+        historical_train_losses = historical_data.get('train_losses', [])
+        historical_test_losses = historical_data.get('test_losses', [])
+        historical_mae_scores = historical_data.get('mae_scores', [])
+        
+        print(f"成功加载历史训练数据: {best_file} (Epoch {best_epoch}, {len(historical_train_losses)} 个数据点)")
+        return historical_train_losses, historical_test_losses, historical_mae_scores
+    except Exception as e:
+        print(f"加载历史训练数据失败: {e}")
+        return [], [], []
+
+def merge_training_data(historical_train, historical_test, historical_mae, 
+                       new_train, new_test, new_mae):
+    """合并历史训练数据和新训练数据"""
+    # 合并数据
+    merged_train = historical_train + new_train
+    merged_test = historical_test + new_test
+    merged_mae = historical_mae + new_mae
+    
+    print(f"训练数据合并完成:")
+    print(f"  历史数据点: {len(historical_train)}")
+    print(f"  新增数据点: {len(new_train)}")
+    print(f"  合并后总计: {len(merged_train)}")
+    
+    return merged_train, merged_test, merged_mae
+
 def train_model(model, train_loader, test_loader, 
-                epochs=HYPERPARAMETERS['EPOCHS'], lr=HYPERPARAMETERS['LEARNING_RATE']):
-    """Train model, including Early Stopping mechanism"""
+                epochs=HYPERPARAMETERS['EPOCHS'], lr=HYPERPARAMETERS['LEARNING_RATE'],
+                start_epoch=0):
+    """Train model, including Early Stopping mechanism and debug mode support"""
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    
+    # 如果是继续训练，加载历史训练数据
+    if start_epoch > 0:
+        historical_train, historical_test, historical_mae = load_historical_training_data(
+            HYPERPARAMETERS['OUTPUT_DIR'], start_epoch
+        )
+    else:
+        historical_train, historical_test, historical_mae = [], [], []
     
     train_losses = []
     test_losses = []
@@ -262,74 +331,106 @@ def train_model(model, train_loader, test_loader,
     
     # Early Stopping related variables
     best_test_loss = float('inf')
-    patience_counter = 0
+    early_stopping_counter = 0
     early_stop_triggered = False
     
-    for epoch in range(epochs):
+    print("开始训练模型...")
+    for epoch in range(start_epoch, start_epoch + epochs):
         # Training phase
         model.train()
-        train_loss = 0.0
-        batch_count = 0
+        total_train_loss = 0.0
+        train_batch_count = 0
+        
+        # Debug mode: limit number of batches per epoch
+        debug_batch_limit = 3  # Limit to first 3 batches in debug mode
+        
         for batch_idx, (data, target) in enumerate(train_loader):
+            # Check debug mode limit
+            if HYPERPARAMETERS['DEBUG_MODE'] and batch_idx >= debug_batch_limit:
+                break
+                
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
-            train_loss += loss.item()
-            batch_count += 1
             
-            # Remove batch limit, train on full dataset
-            # Original limit: if batch_idx >= 2: break
+            total_train_loss += loss.item()
+            train_batch_count += 1
         
-        if batch_count > 0:
-            train_loss /= batch_count
-        train_losses.append(train_loss)
+        # Calculate average training loss
+        avg_train_loss = total_train_loss / train_batch_count if train_batch_count > 0 else 0.0
+        train_losses.append(avg_train_loss)
         
         # Testing phase
         model.eval()
-        test_loss = 0.0
-        mae_score = 0.0
+        total_test_loss = 0.0
+        total_mae = 0.0
         test_batch_count = 0
+        
         with torch.no_grad():
-            for data, target in test_loader:
+            # Debug mode: limit number of batches during testing
+            debug_batch_limit = 3  # Limit to first 3 batches in debug mode
+            
+            for batch_idx, (data, target) in enumerate(test_loader):
+                # Check debug mode limit
+                if HYPERPARAMETERS['DEBUG_MODE'] and batch_idx >= debug_batch_limit:
+                    break
+                    
                 output = model(data)
-                test_loss += criterion(output, target).item()
-                mae_score += mean_absolute_error(target.numpy(), output.numpy())
+                
+                # Calculate MSE loss
+                mse_loss = criterion(output, target)
+                total_test_loss += mse_loss.item()
+                
+                # Calculate MAE using PyTorch for consistency
+                mae = torch.mean(torch.abs(output - target))
+                total_mae += mae.item()
+                
                 test_batch_count += 1
         
-        if test_batch_count > 0:
-            test_loss /= test_batch_count
-            mae_score /= test_batch_count
-        test_losses.append(test_loss)
-        mae_scores.append(mae_score)
+        # Calculate average test metrics
+        avg_test_loss = total_test_loss / test_batch_count if test_batch_count > 0 else 0.0
+        avg_mae = total_mae / test_batch_count if test_batch_count > 0 else 0.0
+        
+        test_losses.append(avg_test_loss)
+        mae_scores.append(avg_mae)
         
         # Early Stopping check - decide whether to stop based on monitored metric
-        current_monitor_value = test_loss  # Current monitored test loss
-        
-        if current_monitor_value < best_test_loss - HYPERPARAMETERS['EARLY_STOPPING_MIN_DELTA']:
-            best_test_loss = current_monitor_value
-            patience_counter = 0
-            # Can save the best model here
+        if avg_test_loss < best_test_loss - HYPERPARAMETERS['EARLY_STOPPING_MIN_DELTA']:
+            best_test_loss = avg_test_loss
+            early_stopping_counter = 0
+            # Save best model
+            best_model_path = os.path.join(HYPERPARAMETERS['OUTPUT_DIR'], f'best_model_epoch_{epoch}.pth')
+            torch.save(model.state_dict(), best_model_path)
         else:
-            patience_counter += 1
+            early_stopping_counter += 1
             
         # Check if early stopping is triggered
-        if patience_counter >= HYPERPARAMETERS['EARLY_STOPPING_PATIENCE']:
+        if early_stopping_counter >= HYPERPARAMETERS['EARLY_STOPPING_PATIENCE']:
             print(f"Epoch {epoch}: Early stopping triggered! {HYPERPARAMETERS['EARLY_STOPPING_MONITOR']} hasn't improved for {HYPERPARAMETERS['EARLY_STOPPING_PATIENCE']} epochs.")
             early_stop_triggered = True
             break
         
-        if epoch % 10 == 0:  # Reduce print frequency to every 10 epochs
+        # Print progress every 10 epochs
+        if epoch % 10 == 0:
             status = " (Early Stop)" if early_stop_triggered else ""
-            print(f'Epoch {epoch}: Train Loss: {train_loss:.6f}, Test Loss: {test_loss:.6f}, MAE: {mae_score:.6f}{status}')
+            print(f'Epoch {epoch}: Train Loss: {avg_train_loss:.6f}, Test Loss: {avg_test_loss:.6f}, MAE: {avg_mae:.6f}{status}')
+    
+    # 合并历史数据和新训练数据
+    if historical_train:
+        train_losses, test_losses, mae_scores = merge_training_data(
+            historical_train, historical_test, historical_mae,
+            train_losses, test_losses, mae_scores
+        )
     
     # Report Early Stopping status after training is complete
+    final_epoch_count = len(train_losses)
     if early_stop_triggered:
-        print(f"Training stopped early, total training rounds: {len(train_losses)}")
+        print(f"Training stopped early, total training rounds: {final_epoch_count}")
         print(f"Best {HYPERPARAMETERS['EARLY_STOPPING_MONITOR']}: {best_test_loss:.6f}")
     else:
-        print(f"Training completed {len(train_losses)} rounds, Early Stopping not triggered")
+        print(f"Training completed {final_epoch_count} rounds, Early Stopping not triggered")
     
     return train_losses, test_losses, mae_scores
 
@@ -366,14 +467,58 @@ def evaluate_model(model, test_loader, scaler_y):
     
     return predictions_original, targets_original, metrics
 
-def main():
-    """Main function"""
-    # Create output directory
-    output_dir = HYPERPARAMETERS['OUTPUT_DIR']
-    os.makedirs(output_dir, exist_ok=True)
+def find_latest_model(output_dir):
+    """查找最新的模型参数文件"""
+    if not os.path.exists(output_dir):
+        return None, 0
     
-    # Generate timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_files = [f for f in os.listdir(output_dir) if f.startswith('model_params_epoch_') and f.endswith('.pth')]
+    
+    if not model_files:
+        return None, 0
+    
+    # 提取epoch编号
+    epochs = []
+    for f in model_files:
+        try:
+            epoch = int(f.split('_')[3].split('.')[0])
+            epochs.append(epoch)
+        except:
+            continue
+    
+    if not epochs:
+        return None, 0
+    
+    latest_epoch = max(epochs)
+    latest_model_path = os.path.join(output_dir, f'model_params_epoch_{latest_epoch}.pth')
+    
+    return latest_model_path, latest_epoch
+
+def load_latest_model(model, output_dir):
+    """加载最新的模型参数"""
+    model_path, epoch = find_latest_model(output_dir)
+    
+    if model_path and os.path.exists(model_path):
+        try:
+            model.load_state_dict(torch.load(model_path))
+            print(f"成功加载模型参数: {model_path} (Epoch {epoch})")
+            return epoch
+        except Exception as e:
+            print(f"加载模型失败: {e}")
+            return 0
+    else:
+        print("未找到可加载的模型文件，从头开始训练")
+        return 0
+
+def main():
+    # 设置设备
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"使用设备: {device}")
+    
+    # 创建输出目录
+    script_name = os.path.splitext(os.path.basename(__file__))[0]
+    output_dir = f"{script_name}_output"
+    os.makedirs(output_dir, exist_ok=True)
     
     # Data file path
     data_path = HYPERPARAMETERS['DATA_PATH']
@@ -410,31 +555,52 @@ def main():
         output_dim=HYPERPARAMETERS['OUTPUT_DIM']
     )
     
+    # 处理是否继续训练的逻辑
+    start_epoch = 0
+    if HYPERPARAMETERS['CONTINUE_TRAINING']:
+        # 尝试加载最新的模型参数以继续训练
+        start_epoch = load_latest_model(model, output_dir)
+    
+    # 计算实际训练轮数
+    actual_epochs = HYPERPARAMETERS['EPOCHS'] + start_epoch
+    
     print(f"开始训练: {len(X_train)}训练样本, {len(X_test)}测试样本")
     print(f"输入维度: {X_train.shape[1]}, 输出维度: {y_train.shape[1]}")
     print(f"MLR结构: {HYPERPARAMETERS['N_QUBITS']} → {HYPERPARAMETERS['MLR_HIDDEN_DIM']} → {HYPERPARAMETERS['OUTPUT_DIM']}")
     print(f"训练样本数: {HYPERPARAMETERS['TRAIN_SAMPLES']}")
     print(f"输入波束数量: {len(input_indices)}, 输出波束数量: {len(output_indices)}")
+    if start_epoch > 0 and HYPERPARAMETERS['CONTINUE_TRAINING']:
+        print(f"继续训练: 从Epoch {start_epoch} 开始，训练至Epoch {actual_epochs-1}")
+    elif start_epoch == 0 or not HYPERPARAMETERS['CONTINUE_TRAINING']:
+        print(f"全新训练: 共 {HYPERPARAMETERS['EPOCHS']} 个epochs")
+    print(f"起始Epoch: {start_epoch}")
     
     # 训练模型
     print("开始训练模型...")
-    train_losses, test_losses, mae_scores = train_model(model, train_loader, test_loader)
+    train_losses, test_losses, mae_scores = train_model(model, train_loader, test_loader, start_epoch=start_epoch)
     
-    # 保存训练过程数据
+    # 保存训练过程数据（使用合并后的完整数据）
     training_data = {
         'train_losses': train_losses,
         'test_losses': test_losses,
         'mae_scores': mae_scores,
-        'epochs': len(train_losses)
+        'epochs': len(train_losses),
+        'training_info': {
+            'start_epoch': start_epoch,
+            'final_epoch': len(train_losses),
+            'historical_epochs': len(train_losses) - HYPERPARAMETERS['EPOCHS'] if start_epoch > 0 else 0,
+            'new_epochs': HYPERPARAMETERS['EPOCHS']
+        }
     }
     
     # 保存模型参数（符合项目规范命名）
-    model_save_path = os.path.join(output_dir, f'model_params_epoch_{len(train_losses)}.pth')
+    final_epoch = len(train_losses)  # 使用合并后的总epoch数
+    model_save_path = os.path.join(output_dir, f'model_params_epoch_{final_epoch}.pth')
     torch.save(model.state_dict(), model_save_path)
     print(f"模型参数已保存到: {model_save_path}")
     
     # 保存训练过程数据
-    training_data_path = os.path.join(output_dir, f'training_data_epoch_{len(train_losses)}.json')
+    training_data_path = os.path.join(output_dir, f'training_data_epoch_{final_epoch}.json')
     with open(training_data_path, 'w') as f:
         json.dump(training_data, f, indent=2)
     print(f"训练过程数据已保存到: {training_data_path}")
@@ -449,10 +615,15 @@ def main():
     results = {
         'metrics': metrics,
         'predictions': predictions_original.tolist(),
-        'targets': targets_original.tolist()
+        'targets': targets_original.tolist(),
+        'training_info': {
+            'start_epoch': start_epoch,
+            'final_epoch': final_epoch,
+            'total_epochs_trained': len(train_losses)
+        }
     }
     
-    results_path = os.path.join(output_dir, f'evaluation_results_epoch_{len(train_losses)}.json')
+    results_path = os.path.join(output_dir, f'evaluation_results_epoch_{final_epoch}.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"评估结果已保存到: {results_path}")
@@ -479,6 +650,10 @@ def main():
     
     print(f"\n训练完成!")
     print(f"输出文件保存在: {output_dir}")
+    if start_epoch > 0:
+        print(f"累计训练: {start_epoch} + {len(train_losses)} = {final_epoch} epochs")
+    else:
+        print(f"总共训练: {len(train_losses)} epochs")
 
 if __name__ == "__main__":
     main()

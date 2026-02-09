@@ -39,8 +39,46 @@ def load_model_params(epoch_num, model_class, output_dir='pqc_reup_v1_output'):
     # 由于模型定义在主文件中，这里暂时返回路径
     return model_path
 
+def plot_training_curves(train_losses, test_losses, mae_scores, epoch_num, output_dir='pqc_reup_v1_output'):
+    """绘制训练曲线，正确显示累积epoch数据"""
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # 计算实际的epoch范围（累积训练）
+    total_epochs = len(train_losses)
+    epochs = range(1, total_epochs + 1)  # 从1开始，显示实际epoch数
+    
+    # 损失曲线
+    axes[0].plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
+    axes[0].plot(epochs, test_losses, 'r-', label='Test Loss', linewidth=2)
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Loss')
+    axes[0].set_title(f'Training and Test Loss Curves (Total {total_epochs} Epochs)')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    axes[0].set_xlim(1, total_epochs)  # 设置x轴范围
+    
+    # MAE曲线
+    axes[1].plot(epochs, mae_scores, 'g-', label='MAE', linewidth=2)
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('MAE')
+    axes[1].set_title(f'Mean Absolute Error Over Time (Total {total_epochs} Epochs)')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    axes[1].set_xlim(1, total_epochs)  # 设置x轴范围
+    
+    plt.tight_layout()
+    
+    # 保存图像
+    filename = f'training_curves_epoch_{epoch_num}.png'
+    save_path = os.path.join(output_dir, filename)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"训练曲线已保存到: {save_path}")
+    return filename
+
 def plot_comprehensive_results(train_losses, test_losses, mae_scores, predictions, targets, input_indices, epoch_num, output_dir='pqc_reup_v1_output'):
-    """绘制综合结果图像，包含训练曲线和Top-N分析"""
+    """绘制综合结果图像，包含训练曲线和Top-N分析，正确显示累积epoch数据"""
     # 计算Top-N准确率
     top_n_results = calculate_top_n_accuracy_both_methods(
         predictions, targets, input_indices, top_n_max=10
@@ -50,24 +88,27 @@ def plot_comprehensive_results(train_losses, test_losses, mae_scores, prediction
     fig, axes = plt.subplots(2, 3, figsize=(20, 12))
     
     # 第一行：训练相关曲线
-    epochs = range(len(train_losses))
+    total_epochs = len(train_losses)
+    epochs = range(1, total_epochs + 1)  # 从1开始，显示实际epoch数
     
     # 训练和测试损失曲线
     axes[0, 0].plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
     axes[0, 0].plot(epochs, test_losses, 'r-', label='Test Loss', linewidth=2)
     axes[0, 0].set_xlabel('Epoch')
     axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].set_title(f'Training and Test Loss Curves')
+    axes[0, 0].set_title(f'Training and Test Loss Curves (Total {total_epochs} Epochs)')
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].set_xlim(1, total_epochs)
     
     # MAE曲线
     axes[0, 1].plot(epochs, mae_scores, 'g-', label='MAE', linewidth=2)
     axes[0, 1].set_xlabel('Epoch')
     axes[0, 1].set_ylabel('MAE')
-    axes[0, 1].set_title(f'Mean Absolute Error Over Time')
+    axes[0, 1].set_title(f'Mean Absolute Error Over Time (Total {total_epochs} Epochs)')
     axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].set_xlim(1, total_epochs)
     
     # Top-N准确率对比曲线
     n_values = list(range(1, len(top_n_results['with_input']) + 1))
@@ -145,40 +186,6 @@ def plot_comprehensive_results(train_losses, test_losses, mae_scores, prediction
     plt.close()
     
     print(f"综合结果图像已保存到: {save_path}")
-    return filename
-
-# 更新原有的plot_training_curves函数为简化版本（如果不单独需要的话）
-def plot_training_curves(train_losses, test_losses, mae_scores, epoch_num, output_dir='pqc_reup_v1_output'):
-    """绘制训练曲线（简化版本，主要用于向后兼容）"""
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    
-    # 损失曲线
-    epochs = range(len(train_losses))
-    axes[0].plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2)
-    axes[0].plot(epochs, test_losses, 'r-', label='Test Loss', linewidth=2)
-    axes[0].set_xlabel('Epoch')
-    axes[0].set_ylabel('Loss')
-    axes[0].set_title(f'Training and Test Loss Curves (Epoch {epoch_num})')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
-    
-    # MAE曲线
-    axes[1].plot(epochs, mae_scores, 'g-', label='MAE', linewidth=2)
-    axes[1].set_xlabel('Epoch')
-    axes[1].set_ylabel('MAE')
-    axes[1].set_title(f'Mean Absolute Error Over Time (Epoch {epoch_num})')
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    # 保存图像
-    filename = f'training_curves_epoch_{epoch_num}.png'
-    save_path = os.path.join(output_dir, filename)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"训练曲线已保存到: {save_path}")
     return filename
 
 def plot_prediction_analysis(predictions, targets, epoch_num, output_dir='pqc_reup_v1_output'):
