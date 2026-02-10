@@ -19,9 +19,9 @@ np.random.seed(42)
 # Hyperparameter configuration
 HYPERPARAMETERS = {
     # Data configuration
-    'TRAIN_START': 4096,
-    'TRAIN_END': 8192,
-    'EPOCHS': 30,  # 设置为标准训练轮数
+    'TRAIN_START': 8192,
+    'TRAIN_END': 12288,
+    'EPOCHS': 20,  # 设置为标准训练轮数
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
     'CONTINUE_TRAINING': True,
@@ -50,7 +50,8 @@ HYPERPARAMETERS = {
     'SHUFFLE_TRAIN': False,
     
     # Other configuration
-    'DATA_PATH': '/Users/luxian/DataSpace/beam_pre/sls_beam_data_spatial_domain_vivo.mat',
+    # 'DATA_PATH': '/Users/luxian/DataSpace/beam_pre/sls_beam_data_spatial_domain_vivo.mat',
+    'DATA_PATH': 'C:\\Users\\HP\\DataSpace\\beam_pre\\sls_beam_data_spatial_domain_vivo.mat',
     'OUTPUT_DIR': 'pqc_reup_v1_output'
 }
 
