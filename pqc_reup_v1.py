@@ -19,9 +19,9 @@ np.random.seed(42)
 # Hyperparameter configuration
 HYPERPARAMETERS = {
     # Data configuration
-    'TRAIN_START': 0,
-    'TRAIN_END': 4096,
-    'EPOCHS': 30,  # 设置为标准训练轮数
+    'TRAIN_START': 6144,
+    'TRAIN_END': 10240,
+    'EPOCHS': 20,  # 设置为标准训练轮数
     'BATCH_SIZE': 32,
     'TEST_RATIO': 0.2,  # Test set accounts for 1/5 of training set
     'CONTINUE_TRAINING': True,
