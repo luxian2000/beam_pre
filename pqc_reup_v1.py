@@ -50,7 +50,8 @@ HYPERPARAMETERS = {
     'SHUFFLE_TRAIN': False,
     
     # Other configuration
-    'DATA_PATH': '/Users/luxian/DataSpace/beam_pre/sls_beam_data_spatial_domain_vivo.mat',
+    # 'DATA_PATH': '/Users/luxian/DataSpace/beam_pre/sls_beam_data_spatial_domain_vivo.mat',
+    'DATA_PATH': 'C:\\Users\\HP\\DataSpace\\beam_pre\\sls_beam_data_spatial_domain_vivo.mat',
     'OUTPUT_DIR': 'pqc_reup_v1_output'
 }
 
