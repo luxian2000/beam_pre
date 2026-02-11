@@ -1,7 +1,7 @@
 # PQC_REUP_V1 Analysis Report - Epoch 170
 
 ## Experiment Information
-- **Analysis Time**: 2026-02-11 09:49:22
+- **Analysis Time**: 2026-02-11 12:13:30
 - **Trained Epochs**: 170
 - **Output Directory**: pqc_reup_v1_output
 

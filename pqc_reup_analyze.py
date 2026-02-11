@@ -83,7 +83,7 @@ def plot_training_curves(train_losses, test_losses, mae_scores, epoch_num, outpu
 
 def plot_comprehensive_results(train_losses, test_losses, mae_scores, predictions, targets, input_indices, epoch_num, output_dir='pqc_reup_v1_output'):
     """绘制综合结果图像，包含训练曲线和Top-N分析，正确显示累积epoch数据"""
-    # 计算Top-N准确率
+    # 计算当前epoch的Top-N准确率
     top_n_results = calculate_top_n_accuracy_both_methods(
         predictions, targets, input_indices, top_n_max=10
     )
@@ -114,7 +114,7 @@ def plot_comprehensive_results(train_losses, test_losses, mae_scores, prediction
     axes[0, 1].grid(True, alpha=0.3)
     axes[0, 1].set_xlim(1, total_epochs)
     
-    # Top-N准确率对比曲线
+    # Top-N准确率对比曲线（当前epoch的准确率）
     n_values = list(range(1, len(top_n_results['with_input']) + 1))
     axes[0, 2].plot(n_values, top_n_results['with_input'], 'o-', linewidth=2, markersize=6, 
                     label='Including Input Beams', color='blue')
@@ -127,7 +127,7 @@ def plot_comprehensive_results(train_losses, test_losses, mae_scores, prediction
     axes[0, 2].legend()
     axes[0, 2].grid(True, alpha=0.3)
     
-    # 第二行：预测分析
+    # 第二行：预测分析和Top-N随epoch变化曲线
     sample_size = min(1000, len(predictions))
     sample_indices = np.random.choice(len(predictions), sample_size, replace=False)
     
@@ -148,38 +148,87 @@ def plot_comprehensive_results(train_losses, test_losses, mae_scores, prediction
     axes[1, 1].set_title(f'Error Distribution')
     axes[1, 1].grid(True, alpha=0.3)
     
-    # Top-N准确率数值表
-    axes[1, 2].axis('tight')
-    axes[1, 2].axis('off')
+    # Top-N准确率随epoch变化曲线（只显示包含输入波束的方法）
+    # 收集所有可用epoch的Top-N数据
+    top_n_evolution_with = []    # 方法A各epoch的Top-N准确率
+    evolution_epochs = []        # 对应的epoch编号
     
-    # 创建表格数据
-    table_data = [['Method', 'Top-N', 'Accuracy', 'Percentage']]
+    # 遍历所有可用的epoch数据文件
+    for epoch_check in range(1, epoch_num + 1):
+        eval_file = os.path.join(output_dir, f'evaluation_results_epoch_{epoch_check}.json')
+        if os.path.exists(eval_file):
+            try:
+                with open(eval_file, 'r') as f:
+                    eval_data = json.load(f)
+                pred_check = np.array(eval_data['predictions'])
+                target_check = np.array(eval_data['targets'])
+                
+                # 计算该epoch的Top-N准确率（只计算包含输入波束的方法）
+                epoch_results = calculate_top_n_accuracy_both_methods(
+                    pred_check, target_check, input_indices, top_n_max=10
+                )
+                
+                top_n_evolution_with.append(epoch_results['with_input'])
+                evolution_epochs.append(epoch_check)
+                
+            except Exception as e:
+                print(f"警告: 无法加载epoch {epoch_check} 的评估数据: {e}")
+                continue
     
-    # 方法A数据
-    for i, acc in enumerate(top_n_results['with_input']):
-        table_data.append([
-            'With Input' if i == 0 else '', 
-            f'Top-{i+1}', 
-            f'{acc:.4f}', 
-            f'{acc*100:.2f}%'
-        ])
-    
-    # 添加分隔行
-    table_data.append(['', '', '', ''])
-    
-    # 方法B数据
-    for i, acc in enumerate(top_n_results['without_input']):
-        table_data.append([
-            'Without Input' if i == 0 else '', 
-            f'Top-{i+1}', 
-            f'{acc:.4f}', 
-            f'{acc*100:.2f}%'
-        ])
-    
-    table = axes[1, 2].table(cellText=table_data, cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
-    table.auto_set_font_size(False)
-    table.set_fontsize(8)
-    axes[1, 2].set_title(f'Top-N Accuracy Summary')
+    # 绘制Top-N准确率演化曲线（只显示包含输入波束）
+    if top_n_evolution_with:
+        n_count = len(top_n_evolution_with[0])  # N的数量
+        # 创建从红色到蓝色的颜色过渡
+        colors = plt.cm.RdYlBu_r(np.linspace(0, 1, n_count))  # 反转色彩映射使Top-1为红色
+        
+        # 为每个Top-N值绘制演化曲线
+        legend_lines = []
+        legend_labels = []
+        for n_idx in range(n_count):
+            # 方法A：包含输入波束 - 实线
+            with_acc_by_epoch = [epoch_data[n_idx] for epoch_data in top_n_evolution_with]
+            line = axes[1, 2].plot(evolution_epochs, with_acc_by_epoch, 
+                                  linewidth=2, linestyle='-', alpha=0.8,
+                                  color=colors[n_idx])
+            
+            legend_lines.append(line[0])
+            legend_labels.append(f'Top-{n_idx+1}')
+        
+        axes[1, 2].set_xlabel('Epoch')
+        axes[1, 2].set_ylabel('Top-N Accuracy')
+        axes[1, 2].set_title(f'Top-N Accuracy Evolution (Including Input Beams)')
+        axes[1, 2].set_ylim(0, 1)
+        
+        # 将图例放在图像内部左上角
+        axes[1, 2].legend(legend_lines, legend_labels, 
+                         loc='upper left', bbox_to_anchor=(0.02, 0.98),
+                         frameon=True, fancybox=True, shadow=True)
+        axes[1, 2].grid(True, alpha=0.3)
+    else:
+        # 如果没有历史数据，显示当前epoch的水平线
+        n_range = range(1, len(top_n_results['with_input']) + 1)
+        # 创建从红色到蓝色的颜色过渡
+        colors = plt.cm.RdYlBu_r(np.linspace(0, 1, len(n_range)))
+        
+        # 为所有Top-N值显示水平线
+        legend_lines = []
+        legend_labels = []
+        for i, acc_with in enumerate(top_n_results['with_input']):
+            line = axes[1, 2].axhline(y=acc_with, xmin=0, xmax=1, color=colors[i], 
+                                     linewidth=2, linestyle='-', alpha=0.7)
+            legend_lines.append(line)
+            legend_labels.append(f'Top-{i+1}')
+        
+        axes[1, 2].set_xlabel('Epoch')
+        axes[1, 2].set_ylabel('Top-N Accuracy')
+        axes[1, 2].set_title(f'Top-N Accuracy (Current Epoch Only)')
+        axes[1, 2].set_ylim(0, 1)
+        
+        # 将图例放在图像内部左上角
+        axes[1, 2].legend(legend_lines, legend_labels, 
+                         loc='upper left', bbox_to_anchor=(0.02, 0.98),
+                         frameon=True, fancybox=True, shadow=True)
+        axes[1, 2].grid(True, alpha=0.3)
     
     plt.tight_layout()
     
@@ -301,63 +350,113 @@ def calculate_top_n_accuracy_both_methods(predictions, targets, input_indices, t
 
 def plot_top_n_analysis(predictions, targets, input_indices, epoch_num, output_dir='pqc_reup_v1_output'):
     """绘制Top-N准确率分析图像"""
-    # 计算两种Top-N准确率
+    # 计算当前epoch的Top-N准确率
     top_n_results = calculate_top_n_accuracy_both_methods(
         predictions, targets, input_indices, top_n_max=10
     )
     
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
     
-    # Top-N准确率对比曲线
+    # Top-N准确率对比曲线（按N值）
     n_values = list(range(1, len(top_n_results['with_input']) + 1))
     
     # 方法A：包含输入波束
     axes[0].plot(n_values, top_n_results['with_input'], 'o-', linewidth=2, markersize=6, 
                  label='Including Input Beams', color='blue')
     
-    # 方法B：不包含输入波束
-    axes[0].plot(n_values, top_n_results['without_input'], 'o-', linewidth=2, markersize=6, 
+    # 方法B：不包含输入波束（仍然显示用于对比）
+    axes[0].plot(n_values, top_n_results['without_input'], 's-', linewidth=2, markersize=6, 
                  label='Excluding Input Beams', color='red')
     
     axes[0].set_xlabel('N')
     axes[0].set_ylabel('Top-N Accuracy')
-    axes[0].set_title(f'Top-N Accuracy Comparison - Epoch {epoch_num}')
+    axes[0].set_title(f'Top-N Accuracy by N Value - Epoch {epoch_num}')
     axes[0].set_xticks(n_values)
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
+    axes[0].set_ylim(0, 1)
     
-    # Top-N准确率数值表
-    axes[1].axis('tight')
-    axes[1].axis('off')
+    # Top-N准确率随epoch变化曲线（只显示包含输入波束的方法）
+    # 收集所有可用epoch的Top-N数据
+    top_n_evolution_with = []    # 方法A各epoch的Top-N准确率
+    evolution_epochs = []        # 对应的epoch编号
     
-    # 创建表格数据
-    table_data = [['Method', 'Top-N', 'Accuracy', 'Percentage']]
+    # 遍历所有可用的epoch数据文件
+    for epoch_check in range(1, epoch_num + 1):
+        eval_file = os.path.join(output_dir, f'evaluation_results_epoch_{epoch_check}.json')
+        if os.path.exists(eval_file):
+            try:
+                with open(eval_file, 'r') as f:
+                    eval_data = json.load(f)
+                pred_check = np.array(eval_data['predictions'])
+                target_check = np.array(eval_data['targets'])
+                
+                # 计算该epoch的Top-N准确率（只计算包含输入波束的方法）
+                epoch_results = calculate_top_n_accuracy_both_methods(
+                    pred_check, target_check, input_indices, top_n_max=10
+                )
+                
+                top_n_evolution_with.append(epoch_results['with_input'])
+                evolution_epochs.append(epoch_check)
+                
+            except Exception as e:
+                print(f"警告: 无法加载epoch {epoch_check} 的评估数据: {e}")
+                continue
     
-    # 方法A数据
-    for i, acc in enumerate(top_n_results['with_input']):
-        table_data.append([
-            'With Input' if i == 0 else '', 
-            f'Top-{i+1}', 
-            f'{acc:.4f}', 
-            f'{acc*100:.2f}%'
-        ])
-    
-    # 添加分隔行
-    table_data.append(['', '', '', ''])
-    
-    # 方法B数据
-    for i, acc in enumerate(top_n_results['without_input']):
-        table_data.append([
-            'Without Input' if i == 0 else '', 
-            f'Top-{i+1}', 
-            f'{acc:.4f}', 
-            f'{acc*100:.2f}%'
-        ])
-    
-    table = axes[1].table(cellText=table_data, cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    axes[1].set_title(f'Top-N Accuracy Summary - Epoch {epoch_num}')
+    # 绘制Top-N准确率演化曲线（只显示包含输入波束）
+    if top_n_evolution_with:
+        n_count = len(top_n_evolution_with[0])  # N的数量
+        # 创建从红色到蓝色的颜色过渡
+        colors = plt.cm.RdYlBu_r(np.linspace(0, 1, n_count))  # 反转色彩映射使Top-1为红色
+        
+        # 为每个Top-N值绘制演化曲线
+        legend_lines = []
+        legend_labels = []
+        for n_idx in range(n_count):
+            # 方法A：包含输入波束 - 实线
+            with_acc_by_epoch = [epoch_data[n_idx] for epoch_data in top_n_evolution_with]
+            line = axes[1].plot(evolution_epochs, with_acc_by_epoch, 
+                               linewidth=2, linestyle='-', alpha=0.8,
+                               color=colors[n_idx])
+            
+            legend_lines.append(line[0])
+            legend_labels.append(f'Top-{n_idx+1}')
+        
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('Top-N Accuracy')
+        axes[1].set_title(f'Top-N Accuracy Evolution (Including Input Beams)')
+        axes[1].set_ylim(0, 1)
+        
+        # 将图例放在图像内部左上角
+        axes[1].legend(legend_lines, legend_labels, 
+                      loc='upper left', bbox_to_anchor=(0.02, 0.98),
+                      frameon=True, fancybox=True, shadow=True)
+        axes[1].grid(True, alpha=0.3)
+    else:
+        # 如果没有历史数据，显示当前epoch的水平线
+        n_range = range(1, len(top_n_results['with_input']) + 1)
+        # 创建从红色到蓝色的颜色过渡
+        colors = plt.cm.RdYlBu_r(np.linspace(0, 1, len(n_range)))
+        
+        # 为所有Top-N值显示水平线
+        legend_lines = []
+        legend_labels = []
+        for i, acc_with in enumerate(top_n_results['with_input']):
+            line = axes[1].axhline(y=acc_with, xmin=0, xmax=1, color=colors[i], 
+                                  linewidth=2, linestyle='-', alpha=0.7)
+            legend_lines.append(line)
+            legend_labels.append(f'Top-{i+1}')
+        
+        axes[1].set_xlabel('Epoch')
+        axes[1].set_ylabel('Top-N Accuracy')
+        axes[1].set_title(f'Top-N Accuracy (Current Epoch Only)')
+        axes[1].set_ylim(0, 1)
+        
+        # 将图例放在图像内部左上角
+        axes[1].legend(legend_lines, legend_labels, 
+                      loc='upper left', bbox_to_anchor=(0.02, 0.98),
+                      frameon=True, fancybox=True, shadow=True)
+        axes[1].grid(True, alpha=0.3)
     
     plt.tight_layout()
     
